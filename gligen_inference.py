@@ -4,8 +4,10 @@ from PIL import Image, ImageDraw
 from omegaconf import OmegaConf
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
-import os 
+import os
+import transformers
 from transformers import CLIPProcessor, CLIPModel
+from transformers.utils.logging import set_verbosity
 from copy import deepcopy
 import torch 
 from ldm.util import instantiate_from_config
@@ -18,6 +20,10 @@ from functools import partial
 import torchvision.transforms.functional as F
 import torchvision.transforms.functional as TF
 import torchvision.transforms as transforms
+from transformers.utils.logging import set_verbosity
+
+
+set_verbosity(transformers.logging.CRITICAL)
 
 device = "cuda"
 
@@ -375,7 +381,7 @@ def prepare_batch_sem(meta, batch=1):
 
 
 @torch.no_grad()
-def run(meta, config, starting_noise=None):
+def run(meta, args, starting_noise=None):
 
     # - - - - - prepare models - - - - - # 
     model, autoencoder, text_encoder, diffusion, config = load_ckpt(meta["ckpt"])
@@ -413,7 +419,6 @@ def run(meta, config, starting_noise=None):
     uc = text_encoder.encode( config.batch_size*[""] )
     if args.negative_prompt is not None:
         uc = text_encoder.encode( config.batch_size*[args.negative_prompt] )
-
 
     # - - - - - sampler - - - - - # 
     alpha_generator_func = partial(alpha_generator, type=meta.get("alpha_type"))
@@ -472,7 +477,6 @@ def run(meta, config, starting_noise=None):
 
     start = len( os.listdir(output_folder) )
     image_ids = list(range(start,start+config.batch_size))
-    print(image_ids)
     for image_id, sample in zip(image_ids, samples_fake):
         img_name = str(int(image_id))+'.png'
         sample = torch.clamp(sample, min=-1, max=1) * 0.5 + 0.5
