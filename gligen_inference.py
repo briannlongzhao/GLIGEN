@@ -381,6 +381,110 @@ def prepare_batch_sem(meta, batch=1):
 
 
 @torch.no_grad()
+def run_list(meta_list, args, starting_noise=None):
+
+    # - - - - - prepare models - - - - - # 
+    model, autoencoder, text_encoder, diffusion, config = load_ckpt(args.ckpt)
+
+    grounding_tokenizer_input = instantiate_from_config(config['grounding_tokenizer_input'])
+    model.grounding_tokenizer_input = grounding_tokenizer_input
+    
+    grounding_downsampler_input = None
+    if "grounding_downsampler_input" in config:
+        grounding_downsampler_input = instantiate_from_config(config['grounding_downsampler_input'])
+
+
+
+    # - - - - - update config from args - - - - - # 
+    config.update( vars(args) )
+    config = OmegaConf.create(config)
+
+
+    # - - - - - prepare batch - - - - - #
+    for meta in meta_list:
+        if "keypoint" in meta["ckpt"]:
+            batch = prepare_batch_kp(meta, config.batch_size)
+        elif "hed" in meta["ckpt"]:
+            batch = prepare_batch_hed(meta, config.batch_size)
+        elif "canny" in meta["ckpt"]:
+            batch = prepare_batch_canny(meta, config.batch_size)
+        elif "depth" in meta["ckpt"]:
+            batch = prepare_batch_depth(meta, config.batch_size)
+        elif "normal" in meta["ckpt"]:
+            batch = prepare_batch_normal(meta, config.batch_size)
+        elif "sem" in meta["ckpt"]:
+            batch = prepare_batch_sem(meta, config.batch_size)
+        else:
+            batch = prepare_batch(meta, config.batch_size)
+        context = text_encoder.encode(  [meta["prompt"]]*config.batch_size  )
+        uc = text_encoder.encode( config.batch_size*[""] )
+        if args.negative_prompt is not None:
+            uc = text_encoder.encode( config.batch_size*[args.negative_prompt] )
+
+        # - - - - - sampler - - - - - # 
+        alpha_generator_func = partial(alpha_generator, type=meta.get("alpha_type"))
+        if config.no_plms:
+            sampler = DDIMSampler(diffusion, model, alpha_generator_func=alpha_generator_func, set_alpha_scale=set_alpha_scale)
+            steps = 250 
+        else:
+            sampler = PLMSSampler(diffusion, model, alpha_generator_func=alpha_generator_func, set_alpha_scale=set_alpha_scale)
+            steps = 50 
+
+
+        # - - - - - inpainting related - - - - - #
+        inpainting_mask = z0 = None  # used for replacing known region in diffusion process
+        inpainting_extra_input = None # used as model input 
+        if "input_image" in meta:
+            # inpaint mode 
+            assert config.inpaint_mode, 'input_image is given, the ckpt must be the inpaint model, are you using the correct ckpt?'
+        
+            inpainting_mask = draw_masks_from_boxes( batch['boxes'], model.image_size  ).cuda()
+        
+            input_image = F.pil_to_tensor( Image.open(meta["input_image"]).convert("RGB").resize((512,512)) ) 
+            input_image = ( input_image.float().unsqueeze(0).cuda() / 255 - 0.5 ) / 0.5
+            z0 = autoencoder.encode( input_image )
+        
+            masked_z = z0*inpainting_mask
+            inpainting_extra_input = torch.cat([masked_z,inpainting_mask], dim=1)              
+    
+
+        # - - - - - input for gligen - - - - - #
+        grounding_input = grounding_tokenizer_input.prepare(batch)
+        grounding_extra_input = None
+        if grounding_downsampler_input != None:
+            grounding_extra_input = grounding_downsampler_input.prepare(batch)
+
+        input = dict(
+            x = starting_noise, 
+            timesteps = None, 
+            context = context, 
+            grounding_input = grounding_input,
+            inpainting_extra_input = inpainting_extra_input,
+            grounding_extra_input = grounding_extra_input,
+        )
+
+
+        # - - - - - start sampling - - - - - #
+        shape = (config.batch_size, model.in_channels, model.image_size, model.image_size)
+        samples_fake = sampler.sample(S=steps, shape=shape, input=input,  uc=uc, guidance_scale=config.guidance_scale, mask=inpainting_mask, x0=z0)
+        samples_fake = autoencoder.decode(samples_fake)
+
+
+        # - - - - - save - - - - - #
+        output_folder = os.path.join(args.output, meta["save_folder_name"])
+        os.makedirs(output_folder, exist_ok=True)
+
+        start = len(os.listdir(output_folder))
+        image_ids = list(range(start,config.batch_size))
+        for image_id, sample in zip(image_ids, samples_fake):
+            img_name = meta["prompt"]+str(int(image_id))+'.png'
+            sample = torch.clamp(sample, min=-1, max=1) * 0.5 + 0.5
+            sample = sample.cpu().numpy().transpose(1,2,0) * 255 
+            sample = Image.fromarray(sample.astype(np.uint8))
+            sample.save(os.path.join(output_folder, img_name))
+
+
+@torch.no_grad()
 def run(meta, args, starting_noise=None):
 
     # - - - - - prepare models - - - - - # 
