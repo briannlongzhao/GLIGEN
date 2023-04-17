@@ -21,6 +21,7 @@ import torchvision.transforms.functional as F
 import torchvision.transforms.functional as TF
 import torchvision.transforms as transforms
 from transformers.utils.logging import set_verbosity
+from tqdm import tqdm
 
 
 set_verbosity(transformers.logging.CRITICAL)
@@ -401,7 +402,7 @@ def run_list(meta_list, args, starting_noise=None):
 
 
     # - - - - - prepare batch - - - - - #
-    for meta in meta_list:
+    for meta in tqdm(meta_list):
         if "keypoint" in meta["ckpt"]:
             batch = prepare_batch_kp(meta, config.batch_size)
         elif "hed" in meta["ckpt"]:
