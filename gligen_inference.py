@@ -160,12 +160,10 @@ def generate_random_bbox(meta, rng):
         elif area > max_bbox_area:
             min_sep -= 0.05
     return torch.tensor([left,top,right,bottom])
-    
-
 
 
 @torch.no_grad()
-def prepare_batch(meta, batch=1, max_objs=30):
+def prepare_batch(meta, batch=1, max_objs=4):
     phrases, images = meta.get("phrases"), meta.get("images")
     images = [None]*len(phrases) if images==None else images 
     phrases = [None]*len(images) if phrases==None else phrases 
@@ -174,7 +172,6 @@ def prepare_batch(meta, batch=1, max_objs=30):
     model = CLIPModel.from_pretrained(version).cuda()
     processor = CLIPProcessor.from_pretrained(version)
 
-    boxes = torch.zeros(max_objs, 4)
     masks = torch.zeros(max_objs)
     text_masks = torch.zeros(max_objs)
     image_masks = torch.zeros(max_objs)
@@ -202,6 +199,7 @@ def prepare_batch(meta, batch=1, max_objs=30):
         for i,j in itertools.product(range(batch), range(num_objs)):
             boxes[i][j] = generate_random_bbox(meta, rng)
     else:
+        boxes = torch.zeros(max_objs, 4)
         for idx, (box, text_feature, image_feature) in enumerate(zip( meta['locations'], text_features, image_features)):
             boxes[idx] = torch.tensor(box)
             masks[idx] = 1
