@@ -380,7 +380,9 @@ def prepare_batch_sem(meta, batch=1):
     return batch_to_device(out, device) 
 
 
-
+"""
+Load ckpt only once for all meta
+"""
 @torch.no_grad()
 def run_list(meta_list, args, starting_noise=None):
 
@@ -403,17 +405,17 @@ def run_list(meta_list, args, starting_noise=None):
 
     # - - - - - prepare batch - - - - - #
     for meta in tqdm(meta_list):
-        if "keypoint" in meta["ckpt"]:
+        if "keypoint" in args.ckpt:
             batch = prepare_batch_kp(meta, config.batch_size)
-        elif "hed" in meta["ckpt"]:
+        elif "hed" in args.ckpt:
             batch = prepare_batch_hed(meta, config.batch_size)
-        elif "canny" in meta["ckpt"]:
+        elif "canny" in args.ckpt:
             batch = prepare_batch_canny(meta, config.batch_size)
-        elif "depth" in meta["ckpt"]:
+        elif "depth" in args.ckpt:
             batch = prepare_batch_depth(meta, config.batch_size)
-        elif "normal" in meta["ckpt"]:
+        elif "normal" in args.ckpt:
             batch = prepare_batch_normal(meta, config.batch_size)
-        elif "sem" in meta["ckpt"]:
+        elif "sem" in args.ckpt:
             batch = prepare_batch_sem(meta, config.batch_size)
         else:
             batch = prepare_batch(meta, config.batch_size)
