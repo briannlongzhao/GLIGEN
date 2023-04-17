@@ -1,3 +1,6 @@
+#output
+generation_samples/
+
 # IntelliJ project files
 .idea
 *.iml

@@ -1,4 +1,5 @@
 import argparse
+import itertools
 from PIL import Image, ImageDraw
 from omegaconf import OmegaConf
 from ldm.models.diffusion.ddim import DDIMSampler
@@ -141,6 +142,27 @@ def complete_mask(has_mask, max_objs):
         return mask
 
 
+def generate_random_bbox(meta, rng):
+    max_bbox_area, min_bbox_area = meta.get("max_bbox_area", 0.8), meta.get("min_bbox_area", 0.1)
+    min_sep = 0;
+    while True:
+        (left,right), (top,bottom) = sorted(rng.random(2)), sorted(rng.random(2))
+        left = max(0, left-min_sep/2)
+        right = min(1, right+min_sep/2)
+        top = max(0, top-min_sep/2)
+        bottom = min(1, bottom+min_sep/2)
+        area = (bottom-top)*(right-left)
+        assert area >= 0 and area <= 1
+        if area > min_bbox_area and area < max_bbox_area:
+            break;
+        elif area < min_bbox_area:
+            min_sep += 0.05
+        elif area > max_bbox_area:
+            min_sep -= 0.05
+    return torch.tensor([left,top,right,bottom])
+    
+
+
 
 @torch.no_grad()
 def prepare_batch(meta, batch=1, max_objs=30):
@@ -161,29 +183,44 @@ def prepare_batch(meta, batch=1, max_objs=30):
     
     text_features = []
     image_features = []
+    num_objs = len(phrases)
     for phrase, image in zip(phrases,images):
         text_features.append(  get_clip_feature(model, processor, phrase, is_image=False) )
         image_features.append( get_clip_feature(model, processor, image,  is_image=True) )
 
-    for idx, (box, text_feature, image_feature) in enumerate(zip( meta['locations'], text_features, image_features)):
-        boxes[idx] = torch.tensor(box)
-        masks[idx] = 1
-        if text_feature is not None:
-            text_embeddings[idx] = text_feature
-            text_masks[idx] = 1 
-        if image_feature is not None:
-            image_embeddings[idx] = image_feature
-            image_masks[idx] = 1 
+    if meta.get("locations") is None or meta["locations"] == "random":
+        rng = np.random.default_rng(meta.get("seed"))
+        for idx, (text_feature, image_feature) in enumerate(zip(text_features, image_features)):
+            masks[idx] = 1
+            if text_feature is not None:
+                text_embeddings[idx] = text_feature
+                text_masks[idx] = 1 
+            if image_feature is not None:
+                image_embeddings[idx] = image_feature
+                image_masks[idx] = 1
+        boxes = torch.zeros((batch,max_objs,4))
+        for i,j in itertools.product(range(batch), range(num_objs)):
+            boxes[i][j] = generate_random_bbox(meta, rng)
+    else:
+        for idx, (box, text_feature, image_feature) in enumerate(zip( meta['locations'], text_features, image_features)):
+            boxes[idx] = torch.tensor(box)
+            masks[idx] = 1
+            if text_feature is not None:
+                text_embeddings[idx] = text_feature
+                text_masks[idx] = 1 
+            if image_feature is not None:
+                image_embeddings[idx] = image_feature
+                image_masks[idx] = 1 
+        boxes = boxes.unsqueeze(0).repeat(batch,1,1)
 
     out = {
-        "boxes" : boxes.unsqueeze(0).repeat(batch,1,1),
+        "boxes" : boxes,
         "masks" : masks.unsqueeze(0).repeat(batch,1),
         "text_masks" : text_masks.unsqueeze(0).repeat(batch,1)*complete_mask( meta.get("text_mask"), max_objs ),
         "image_masks" : image_masks.unsqueeze(0).repeat(batch,1)*complete_mask( meta.get("image_mask"), max_objs ),
         "text_embeddings"  : text_embeddings.unsqueeze(0).repeat(batch,1,1),
         "image_embeddings" : image_embeddings.unsqueeze(0).repeat(batch,1,1)
     }
-
     return batch_to_device(out, device) 
 
 
