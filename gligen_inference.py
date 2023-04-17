@@ -480,7 +480,7 @@ def run_list(meta_list, args, starting_noise=None):
         start = len(os.listdir(output_folder))
         image_ids = list(range(start,start+config.batch_size))
         for image_id, sample in zip(image_ids, samples_fake):
-            img_name = meta["prompt"].replace('.','')+str(int(image_id))+'.png'
+            img_name = meta["prompt"]+str(int(image_id))+'.png'
             sample = torch.clamp(sample, min=-1, max=1) * 0.5 + 0.5
             sample = sample.cpu().numpy().transpose(1,2,0) * 255 
             sample = Image.fromarray(sample.astype(np.uint8))
